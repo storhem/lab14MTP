@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.env
+
+# Rust
+target/
+Cargo.lock
+
+# Go
+*.exe
+
+# Data
+data/
+output/
+plots/
+
+# Docker
+.dockerignore
