@@ -1,0 +1,15 @@
+[package]
+name = "vacancy_validator"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "vacancy_validator"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+pyo3 = { version = "0.21", features = ["extension-module"] }
+
+[features]
+default = []
+python = ["pyo3/extension-module"]
