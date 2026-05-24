@@ -36,6 +36,7 @@ func main() {
 	outputDir := flag.String("output", "./data", "output directory for JSON files")
 	windowSec := flag.Int("window", 60, "tumbling window duration in seconds")
 	batchSize := flag.Int("batch", 50, "batch size before writing to file")
+	mockMode := flag.Bool("mock", false, "use generated data instead of hh.ru API (use when API is unavailable)")
 	flag.Parse()
 
 	if *workerID == "" {
@@ -121,7 +122,7 @@ func main() {
 		collectWg.Add(1)
 		go func(s etcdcoord.Shard) {
 			defer collectWg.Done()
-			collectShard(ctx, client, s, vacancyCh, win)
+			collectShard(ctx, client, s, vacancyCh, win, *mockMode)
 		}(shard)
 	}
 
@@ -142,24 +143,33 @@ func main() {
 }
 
 // collectShard непрерывно собирает вакансии по заданному шарду.
-func collectShard(ctx context.Context, client *hh.Client, shard etcdcoord.Shard, out chan<- hh.Vacancy, win *window.TumblingWindow) {
-	log.Printf("[collector] shard=%d area=%s query=%q — started", shard.ID, shard.AreaName, shard.Query)
+func collectShard(ctx context.Context, client *hh.Client, shard etcdcoord.Shard, out chan<- hh.Vacancy, win *window.TumblingWindow, mock bool) {
+	log.Printf("[collector] shard=%d area=%s query=%q — started (mock=%v)", shard.ID, shard.AreaName, shard.Query, mock)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	collect := func() {
-		resp, err := client.SearchVacancies(hh.SearchParams{
-			Text:    shard.Query,
-			AreaID:  shard.AreaID,
-			PerPage: 100,
-		})
-		if err != nil {
-			log.Printf("[collector] shard=%d error: %v", shard.ID, err)
-			return
+		var vacancies []hh.Vacancy
+
+		if mock {
+			vacancies = hh.GenerateVacancies(shard.AreaID, shard.AreaName, shard.Query, 100)
+		} else {
+			resp, err := client.SearchVacancies(hh.SearchParams{
+				Text:    shard.Query,
+				AreaID:  shard.AreaID,
+				PerPage: 100,
+			})
+			if err != nil {
+				log.Printf("[collector] shard=%d API error: %v — switching to mock", shard.ID, err)
+				vacancies = hh.GenerateVacancies(shard.AreaID, shard.AreaName, shard.Query, 50)
+			} else {
+				vacancies = resp.Items
+				log.Printf("[collector] shard=%d API found=%d", shard.ID, resp.Found)
+			}
 		}
 
 		validated := 0
-		for _, v := range resp.Items {
+		for _, v := range vacancies {
 			salaryFrom, salaryTo := 0, 0
 			if v.Salary != nil {
 				if v.Salary.From != nil {
@@ -181,7 +191,7 @@ func collectShard(ctx context.Context, client *hh.Client, shard etcdcoord.Shard,
 				return
 			}
 		}
-		log.Printf("[collector] shard=%d found=%d validated=%d", shard.ID, resp.Found, validated)
+		log.Printf("[collector] shard=%d total=%d validated=%d", shard.ID, len(vacancies), validated)
 	}
 
 	collect()
