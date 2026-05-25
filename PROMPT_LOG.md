@@ -1,10 +1,5 @@
 # Prompt Log — Лабораторная работа №14
 
-**Студент:** Евланичев Максим Юрьевич  
-**Группа:** 221131  
-**Вариант:** 7 — Анализ вакансий hh.ru  
-**Инструмент:** Claude Code (claude-sonnet-4-6)
-
 ---
 
 ## Задание 1: Распределённый сборщик на Go (etcd)
@@ -306,20 +301,160 @@ if "area" in df.columns and df["area"].dtype == pl.Struct:
 
 ---
 
+## Код-ревью и исправление найденных проблем
+
+### Промпт 1 — Полный код-ревью с проверкой по требованиям
+
+**Промпт:**
+```
+Сделай полный код-ревью репозитория. Пройдись по каждому из 6 заданий повышенной
+сложности и сравни реализацию с требованиями из PDF. Для каждой проблемы укажи:
+severity (critical / important / minor), конкретный файл и строку, что именно
+сломано и почему. Не нужно хвалить — нужен честный список дефектов.
+```
+
+**Что проверялось:**
+
+*Задание 1 — etcd-координатор:*
+- `concurrency.NewMutex.TryLock()` — паттерн правильный, lease TTL=30s
+- Обнаружена **критическая** проблема: Dockerfile использует exec form CMD:
+  ```dockerfile
+  CMD ["./collector", "--etcd", "${ETCD_ENDPOINTS:-localhost:2379}", ...]
+  ```
+  В exec form Docker не раскрывает `${VAR}` — строка передаётся буквально
+  в программу. В Docker/K8s сборщик всегда подключается к `localhost:2379`.
+
+*Задание 3 — Arrow Flight:*
+- Найдена **важная** проблема в `arrow/server.go`: `DoGet` итерирует по channel
+  через `for w := range s.windows` — канал закрывается только при `Stop()`,
+  то есть `fetch_all()` на Python-стороне блокируется навсегда.
+- `arrow_client.py` написан корректно, но нигде не вызывается — `main.py`
+  читает только JSONL, Arrow Flight в пайплайн не интегрирован.
+
+*Задание 4 — Rust cgo:*
+- Dockerfile компилирует с `CGO_ENABLED=0` — Rust-валидатор в Docker не
+  используется, всегда работает Go-fallback. PyO3-модуль не подключён в Python.
+
+*Задание 5 — Kubernetes:*
+- **Критически**: `collector.yaml` ссылается на `vacancy-data-pvc`, но
+  `PersistentVolumeClaim` нигде не объявлен — `kubectl apply` упадёт.
+- `main.go` не читает env vars (`os.Getenv`), только флаги через `flag.Parse`.
+  K8s устанавливает `ETCD_ENDPOINTS`, `WORKER_ID` через `env:`, они игнорируются.
+
+*Задание 6 — Streamlit:*
+- `time.sleep(refresh_sec)` перед `st.rerun()` блокирует main thread Streamlit
+  полностью — при `refresh_sec=300` UI заморожен 5 минут.
+
+**Дополнительно найдено:**
+- `splitComma` в `main.go` — ручная реализация `strings.Split` с фильтром,
+  стандартная библиотека делает то же самое
+- Тихий дроп агрегации в `window.flush()` без логирования
+
+---
+
+### Промпт 2 — Исправление всех найденных проблем
+
+**Промпт:**
+```
+Исправь все найденные проблемы. Критические — обязательно, остальные — тоже.
+```
+
+**Результат по каждой проблеме:**
+
+**Критические:**
+
+1. Dockerfile CMD + env vars в main.go — две взаимосвязанные проблемы.
+   Решение: добавить в `main.go` helper-функции `envOr / envOrInt / envOrBool`
+   и использовать их как defaults для всех флагов:
+   ```go
+   etcdEndpoints := flag.String("etcd", envOr("ETCD_ENDPOINTS", "localhost:2379"), "...")
+   mockMode      := flag.Bool("mock",  envOrBool("MOCK_MODE", false), "...")
+   ```
+   Dockerfile упрощается до `ENTRYPOINT ["./collector"]` без CMD — конфиг
+   полностью через env vars, которые теперь читает сама программа.
+
+2. PVC не объявлен — добавлен `PersistentVolumeClaim vacancy-data-pvc`
+   прямо в `k8s/collector.yaml` перед HPA:
+   ```yaml
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata:
+     name: vacancy-data-pvc
+     namespace: lab14
+   spec:
+     accessModes: [ReadWriteOnce]
+     resources:
+       requests:
+         storage: 1Gi
+   ```
+
+**Важные:**
+
+3. `DoGet` блокировался — заменил `for range channel` на `select` с тремя
+   ветками: новое окно, `ctx.Done()` (клиент отключился), и 5-секундный
+   idle-таймер. Теперь `fetch_all()` возвращается через 5с после последнего окна:
+   ```go
+   idle := time.NewTimer(5 * time.Second)
+   for {
+       select {
+       case <-ctx.Done():    return nil
+       case w, ok := <-s.windows:
+           if !ok { return nil }
+           idle.Reset(5 * time.Second)
+           // ... write record
+       case <-idle.C:        return nil
+       }
+   }
+   ```
+
+4. `arrow_client.py` интегрирован в `main.py` через `--arrow-host`:
+   ```bash
+   python main.py --data-dir ../../data --arrow-host localhost --arrow-port 50051
+   ```
+   При наличии флага выполняется `client.fetch_all()` и выводятся агрегации
+   из Arrow Flight до основного JSONL-анализа.
+
+**Minor:**
+
+5. `docker-compose.yml` — добавлен `MOCK_MODE: "true"` в оба коллектора,
+   чтобы не было 403-ошибок от hh.ru API при запуске в Docker.
+
+6. Streamlit auto-refresh — `time.sleep(N)` разбит на N итераций по 1 секунде
+   с `st.empty()` счётчиком обратного отсчёта. UI обновляется каждую секунду.
+
+7. `splitComma` удалён, заменён на `strings.Split` с inline-фильтром.
+
+8. `window.flush()` — добавлен `log.Printf` при тихом дропе агрегации.
+
+**Проверка:** `go build ./...` и `go test ./...` (10/10) после правок — всё зелёное.
+
+---
+
 ## Итоговая статистика
 
 | Метрика | Значение |
 |---|---|
-| Всего промптов | 14 |
+| Всего промптов | 16 |
 | Go тестов | 10 / 10 ✓ |
 | Python тестов | 8 / 8 ✓ |
 | Rust тестов | 6 / 6 ✓ |
 | Багов найдено в процессе | 5 |
-| Исправлено самостоятельно | 5 |
+| Найдено при код-ревью | 8 |
+| Исправлено | 13 |
 
-**Баги по категориям:**
-- Несуществующий API Arrow Flight (`flight.NewDataWriter`) — читал доки, нашёл `flight.NewRecordWriter`
+**Баги из разработки:**
+- Несуществующий API Arrow Flight (`flight.NewDataWriter`) — нашёл `flight.NewRecordWriter`
 - Несовпадение типов в `window.go` (`*salaryAccum` vs `*areaAccum`)
 - struct-поля не разворачивались в `clean_data` — DuckDB не видел `area_name`
 - `.empty` (Pandas) vs `.is_empty()` (Polars) в тестах
 - `pyo3` не поддерживает Python 3.13 — сделал optional feature
+
+**Баги из код-ревью:**
+- Docker exec form CMD не раскрывает `${VAR}` — env vars игнорировались
+- `main.go` не читал `os.Getenv` — K8s конфиг не применялся
+- PVC `vacancy-data-pvc` не объявлен — k8s apply падал
+- `DoGet` блокировался навсегда — `fetch_all()` зависал
+- `arrow_client.py` не был подключён к пайплайну
+- Нет `MOCK_MODE` в Docker Compose — лишние 403 в логах
+- Streamlit замораживал UI на весь интервал обновления
+- Тихий дроп агрегации без лога в `window.flush()`
