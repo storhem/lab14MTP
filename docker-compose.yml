@@ -30,6 +30,7 @@ services:
       OUTPUT_DIR: "/data"
       WINDOW_SEC: "60"
       BATCH_SIZE: "50"
+      MOCK_MODE: "true"  # hh.ru API недоступен без токена; используем генератор
     volumes:
       - vacancy-data:/data
     ports:
@@ -52,6 +53,7 @@ services:
       OUTPUT_DIR: "/data"
       WINDOW_SEC: "60"
       BATCH_SIZE: "50"
+      MOCK_MODE: "true"  # hh.ru API недоступен без токена; используем генератор
     volumes:
       - vacancy-data:/data
     ports:

@@ -1,6 +1,7 @@
 package window
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -99,6 +100,7 @@ func (w *TumblingWindow) flush(t time.Time) {
 	select {
 	case w.out <- agg:
 	default:
+		log.Printf("[window] aggregation dropped (channel full): %d vacancies lost", len(vacancies))
 	}
 }
 

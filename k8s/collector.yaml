@@ -65,6 +65,19 @@ spec:
     targetPort: 50051
     name: arrow-flight
 ---
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vacancy-data-pvc
+  namespace: lab14
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
 # HPA: автоскалирование по CPU (Задание 5 повышенного уровня)
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

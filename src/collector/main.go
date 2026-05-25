@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -18,6 +20,34 @@ import (
 	"lab14/collector/validator"
 	"lab14/collector/window"
 )
+
+// envOr возвращает значение переменной окружения или дефолт.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func envOrInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func envOrBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	switch strings.ToLower(v) {
+	case "true", "1", "yes":
+		return true
+	case "false", "0", "no":
+		return false
+	}
+	return def
+}
 
 // Шарды (регион + запрос) — распределяются между экземплярами сборщика.
 var shards = []etcdcoord.Shard{
@@ -30,13 +60,15 @@ var shards = []etcdcoord.Shard{
 }
 
 func main() {
-	etcdEndpoints := flag.String("etcd", "localhost:2379", "etcd endpoints (comma-separated)")
-	workerID := flag.String("worker", "", "worker ID (default: hostname)")
-	flightAddr := flag.String("flight", ":50051", "Arrow Flight listen address")
-	outputDir := flag.String("output", "./data", "output directory for JSON files")
-	windowSec := flag.Int("window", 60, "tumbling window duration in seconds")
-	batchSize := flag.Int("batch", 50, "batch size before writing to file")
-	mockMode := flag.Bool("mock", false, "use generated data instead of hh.ru API (use when API is unavailable)")
+	// Флаги читают значения сначала из переменных окружения (для Docker/K8s),
+	// потом из CLI-аргументов, которые имеют приоритет при явном указании.
+	etcdEndpoints := flag.String("etcd", envOr("ETCD_ENDPOINTS", "localhost:2379"), "etcd endpoints (comma-separated)")
+	workerID := flag.String("worker", envOr("WORKER_ID", ""), "worker ID (default: hostname)")
+	flightAddr := flag.String("flight", envOr("FLIGHT_ADDR", ":50051"), "Arrow Flight listen address")
+	outputDir := flag.String("output", envOr("OUTPUT_DIR", "./data"), "output directory for JSON files")
+	windowSec := flag.Int("window", envOrInt("WINDOW_SEC", 60), "tumbling window duration in seconds")
+	batchSize := flag.Int("batch", envOrInt("BATCH_SIZE", 50), "batch size before writing to file")
+	mockMode := flag.Bool("mock", envOrBool("MOCK_MODE", false), "use generated data instead of hh.ru API (use when API is unavailable)")
 	flag.Parse()
 
 	if *workerID == "" {
@@ -59,10 +91,13 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	// Подключаемся к etcd
-	coord, err := etcdcoord.NewCoordinator(
-		splitComma(*etcdEndpoints),
-		*workerID,
-	)
+	endpoints := make([]string, 0)
+	for _, ep := range strings.Split(*etcdEndpoints, ",") {
+		if ep = strings.TrimSpace(ep); ep != "" {
+			endpoints = append(endpoints, ep)
+		}
+	}
+	coord, err := etcdcoord.NewCoordinator(endpoints, *workerID)
 	if err != nil {
 		log.Fatalf("etcd coordinator: %v", err)
 	}
@@ -256,16 +291,3 @@ func writeBatches(ctx context.Context, ch <-chan hh.Vacancy, dir string, batchSi
 	}
 }
 
-func splitComma(s string) []string {
-	result := []string{}
-	start := 0
-	for i := 0; i <= len(s); i++ {
-		if i == len(s) || s[i] == ',' {
-			if part := s[start:i]; part != "" {
-				result = append(result, part)
-			}
-			start = i + 1
-		}
-	}
-	return result
-}

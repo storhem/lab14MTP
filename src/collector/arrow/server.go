@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -37,20 +38,39 @@ var windowSchema = arrow.NewSchema([]arrow.Field{
 	{Name: "skill_count", Type: arrow.PrimitiveTypes.Int64},
 }, nil)
 
+// idleTimeout — сколько ждать следующего окна прежде чем завершить стрим.
+// Позволяет Python-клиенту получить накопленные окна и завершить fetch_all().
+const idleTimeout = 5 * time.Second
+
 func (s *FlightServer) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
 	alloc := memory.NewGoAllocator()
 	writer := flight.NewRecordWriter(stream, ipc.WithSchema(windowSchema), ipc.WithAllocator(alloc))
 	defer writer.Close()
 
-	for w := range s.windows {
-		rec := buildRecord(alloc, w)
-		if err := writer.Write(rec); err != nil {
+	ctx := stream.Context()
+	idle := time.NewTimer(idleTimeout)
+	defer idle.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case w, ok := <-s.windows:
+			if !ok {
+				return nil
+			}
+			idle.Reset(idleTimeout)
+			rec := buildRecord(alloc, w)
+			if err := writer.Write(rec); err != nil {
+				rec.Release()
+				return fmt.Errorf("write record: %w", err)
+			}
 			rec.Release()
-			return fmt.Errorf("write record: %w", err)
+		case <-idle.C:
+			// Нет новых окон — завершаем стрим, клиент получит все данные.
+			return nil
 		}
-		rec.Release()
 	}
-	return nil
 }
 
 // buildRecord строит Arrow Record из агрегированного окна.

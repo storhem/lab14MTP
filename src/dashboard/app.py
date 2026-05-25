@@ -235,9 +235,14 @@ def main():
     render_skills_chart(df)
     render_raw_data(df)
 
-    # Авто-обновление
+    # Авто-обновление: разбиваем sleep на 1-секундные шаги,
+    # чтобы отображать счётчик и не замораживать UI на весь интервал.
     if auto_refresh:
-        time.sleep(refresh_sec)
+        counter = st.empty()
+        for remaining in range(refresh_sec, 0, -1):
+            counter.caption(f"Следующее обновление через {remaining} с.")
+            time.sleep(1)
+        counter.empty()
         st.cache_data.clear()
         st.rerun()
 

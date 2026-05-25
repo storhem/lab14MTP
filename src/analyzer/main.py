@@ -30,10 +30,30 @@ def main():
     parser.add_argument("--output-dir", default="./output", help="Output directory")
     parser.add_argument("--plots-dir", default="./plots", help="Plots output directory")
     parser.add_argument("--skip-plots", action="store_true")
+    parser.add_argument(
+        "--arrow-host", default="",
+        help="Arrow Flight сервер (host). Если задан — получить агрегации через Arrow Flight RPC",
+    )
+    parser.add_argument("--arrow-port", type=int, default=50051, help="Arrow Flight порт")
     args = parser.parse_args()
 
     Path(args.output_dir).mkdir(exist_ok=True)
     Path(args.plots_dir).mkdir(exist_ok=True)
+
+    # Задание 3 (повышенное): получение агрегаций через Arrow Flight RPC
+    if args.arrow_host:
+        logger.info(f"Connecting to Arrow Flight at {args.arrow_host}:{args.arrow_port}...")
+        try:
+            from arrow_client import VacancyFlightClient
+            with VacancyFlightClient(args.arrow_host, args.arrow_port) as client:
+                arrow_df = client.fetch_all()
+            if not arrow_df.is_empty():
+                print(f"\n=== Arrow Flight: получено {len(arrow_df)} строк агрегаций ===")
+                print(arrow_df)
+            else:
+                logger.warning("Arrow Flight: нет данных (сборщик ещё не накопил окно?)")
+        except Exception as e:
+            logger.warning(f"Arrow Flight недоступен: {e}")
 
     # Задание 4: загрузка данных
     logger.info("Loading data...")
