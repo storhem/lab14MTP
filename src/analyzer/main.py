@@ -31,6 +31,10 @@ def main():
     parser.add_argument("--plots-dir", default="./plots", help="Plots output directory")
     parser.add_argument("--skip-plots", action="store_true")
     parser.add_argument(
+        "--benchmark", action="store_true",
+        help="Запустить оценку производительности конвейера (время, память, объём данных)",
+    )
+    parser.add_argument(
         "--arrow-host", default="",
         help="Arrow Flight сервер (host). Если задан — получить агрегации через Arrow Flight RPC",
     )
@@ -90,6 +94,12 @@ def main():
     if not args.skip_plots:
         logger.info("Generating visualizations...")
         generate_all_plots(df, args.plots_dir)
+
+    # Задание 4 (повышенное): оценка производительности конвейера
+    if args.benchmark:
+        logger.info("Running performance benchmark...")
+        from benchmark import run_benchmark
+        run_benchmark(args.data_dir, parquet_path)
 
     logger.info("Analysis complete!")
 
