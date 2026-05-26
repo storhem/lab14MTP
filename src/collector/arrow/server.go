@@ -103,17 +103,29 @@ func buildRecord(alloc memory.Allocator, w window.AggregatedWindow) arrow.Record
 	return b.NewRecord()
 }
 
-// StartFlightServer запускает gRPC Arrow Flight сервер.
+// newGRPCServer настраивает gRPC-сервер с зарегистрированным Arrow Flight handler.
+func newGRPCServer(windows <-chan window.AggregatedWindow) *grpc.Server {
+	srv := NewFlightServer(windows)
+	grpcSrv := grpc.NewServer()
+	flight.RegisterFlightServiceServer(grpcSrv, srv)
+	return grpcSrv
+}
+
+// StartFlightServer запускает gRPC Arrow Flight сервер (блокирующий вызов).
 func StartFlightServer(addr string, windows <-chan window.AggregatedWindow) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
 
-	srv := NewFlightServer(windows)
-	grpcSrv := grpc.NewServer()
-	flight.RegisterFlightServiceServer(grpcSrv, srv)
-
 	log.Printf("[arrow] Flight server listening on %s", addr)
-	return grpcSrv.Serve(lis)
+	return newGRPCServer(windows).Serve(lis)
+}
+
+// ServeOnListener запускает сервер на переданном listener без блокировки.
+// Возвращает *grpc.Server для управления (GracefulStop в тестах).
+func ServeOnListener(lis net.Listener, windows <-chan window.AggregatedWindow) *grpc.Server {
+	srv := newGRPCServer(windows)
+	go srv.Serve(lis) //nolint:errcheck
+	return srv
 }
