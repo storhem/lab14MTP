@@ -1,11 +1,17 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY ../analyzer/requirements.txt .
+
+# Build context: ./src (задаётся в docker-compose.yml)
+# Устанавливаем зависимости анализатора + streamlit
+COPY analyzer/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt streamlit
 
-COPY . .
-COPY ../analyzer/analysis.py /app/../analyzer/analysis.py
+# Файлы дашборда
+COPY dashboard/ .
+
+# analysis.py нужен дашборду: app.py добавляет /analyzer в sys.path
+COPY analyzer/analysis.py /analyzer/analysis.py
 
 RUN mkdir -p /data
 

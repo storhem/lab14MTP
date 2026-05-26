@@ -83,8 +83,8 @@ services:
   # Streamlit-дашборд (Задание 6: веб-дашборд с реальным временем)
   dashboard:
     build:
-      context: ./src/dashboard
-      dockerfile: Dockerfile
+      context: ./src          # шире чем ./src/dashboard — нужен доступ к ../analyzer/
+      dockerfile: dashboard/Dockerfile
     container_name: lab14-dashboard
     ports:
       - "8501:8501"
