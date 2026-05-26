@@ -39,6 +39,12 @@ def main():
         help="Arrow Flight сервер (host). Если задан — получить агрегации через Arrow Flight RPC",
     )
     parser.add_argument("--arrow-port", type=int, default=50051, help="Arrow Flight порт")
+    parser.add_argument(
+        "--nats-url", default="",
+        help="NATS URL (e.g. nats://localhost:4222). Если задан — запустить sliding window консьюмер",
+    )
+    parser.add_argument("--nats-window", type=int, default=60, help="размер скользящего окна (секунды)")
+    parser.add_argument("--nats-report", type=int, default=10, help="интервал вывода статистики NATS (сек)")
     args = parser.parse_args()
 
     Path(args.output_dir).mkdir(exist_ok=True)
@@ -94,6 +100,17 @@ def main():
     if not args.skip_plots:
         logger.info("Generating visualizations...")
         generate_all_plots(df, args.plots_dir)
+
+    # Задание 7 (повышенное): NATS скользящее окно (запускается в отдельном процессе/потоке)
+    if args.nats_url:
+        logger.info(f"Starting NATS sliding window consumer: {args.nats_url}, window={args.nats_window}s")
+        try:
+            import asyncio
+            from nats_consumer import SlidingWindowConsumer
+            consumer = SlidingWindowConsumer(args.nats_url, window_sec=args.nats_window)
+            asyncio.run(consumer.run(report_interval=args.nats_report))
+        except KeyboardInterrupt:
+            logger.info("NATS consumer stopped.")
 
     # Задание 4 (повышенное): оценка производительности конвейера
     if args.benchmark:

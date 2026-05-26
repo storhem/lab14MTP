@@ -17,6 +17,7 @@ import (
 	arrowsrv "lab14/collector/arrow"
 	etcdcoord "lab14/collector/etcd"
 	"lab14/collector/hh"
+	natspub "lab14/collector/nats"
 	"lab14/collector/validator"
 	"lab14/collector/window"
 )
@@ -69,6 +70,7 @@ func main() {
 	windowSec := flag.Int("window", envOrInt("WINDOW_SEC", 60), "tumbling window duration in seconds")
 	batchSize := flag.Int("batch", envOrInt("BATCH_SIZE", 50), "batch size before writing to file")
 	mockMode := flag.Bool("mock", envOrBool("MOCK_MODE", false), "use generated data instead of hh.ru API (use when API is unavailable)")
+	natsURL := flag.String("nats", envOr("NATS_URL", ""), "NATS server URL (e.g. nats://nats:4222); if empty — NATS disabled")
 	flag.Parse()
 
 	if *workerID == "" {
@@ -128,6 +130,18 @@ func main() {
 		}
 	}()
 
+	// Задание 7: NATS-публикатор (опционально, если задан NATS_URL)
+	var pub *natspub.Publisher
+	if *natsURL != "" {
+		var err error
+		pub, err = natspub.NewPublisher(*natsURL, natspub.DefaultSubject)
+		if err != nil {
+			log.Printf("[nats] publisher unavailable: %v — continuing without NATS", err)
+		} else {
+			defer pub.Close()
+		}
+	}
+
 	// Канал вакансий с буфером
 	vacancyCh := make(chan hh.Vacancy, 500)
 
@@ -157,7 +171,7 @@ func main() {
 		collectWg.Add(1)
 		go func(s etcdcoord.Shard) {
 			defer collectWg.Done()
-			collectShard(ctx, client, s, vacancyCh, win, *mockMode)
+			collectShard(ctx, client, s, vacancyCh, win, *mockMode, pub)
 		}(shard)
 	}
 
@@ -178,7 +192,7 @@ func main() {
 }
 
 // collectShard непрерывно собирает вакансии по заданному шарду.
-func collectShard(ctx context.Context, client *hh.Client, shard etcdcoord.Shard, out chan<- hh.Vacancy, win *window.TumblingWindow, mock bool) {
+func collectShard(ctx context.Context, client *hh.Client, shard etcdcoord.Shard, out chan<- hh.Vacancy, win *window.TumblingWindow, mock bool, pub *natspub.Publisher) {
 	log.Printf("[collector] shard=%d area=%s query=%q — started (mock=%v)", shard.ID, shard.AreaName, shard.Query, mock)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -220,6 +234,12 @@ func collectShard(ctx context.Context, client *hh.Client, shard etcdcoord.Shard,
 			}
 			validated++
 			win.Add(v)
+			// Задание 7: публикуем в NATS для Python скользящего окна
+			if pub != nil {
+				if err := pub.Publish(v); err != nil {
+					log.Printf("[nats] publish shard=%d: %v", shard.ID, err)
+				}
+			}
 			select {
 			case out <- v:
 			case <-ctx.Done():
