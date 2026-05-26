@@ -111,7 +111,7 @@ services:
       - "--nats-url"
       - "nats://nats:4222"
       - "--window-sec"
-      - "60"
+      - "300"
       - "--report-interval"
       - "10"
     depends_on:

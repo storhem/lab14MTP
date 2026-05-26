@@ -43,7 +43,7 @@ def main():
         "--nats-url", default="",
         help="NATS URL (e.g. nats://localhost:4222). Если задан — запустить sliding window консьюмер",
     )
-    parser.add_argument("--nats-window", type=int, default=60, help="размер скользящего окна (секунды)")
+    parser.add_argument("--nats-window", type=int, default=300, help="размер скользящего окна (секунды)")
     parser.add_argument("--nats-report", type=int, default=10, help="интервал вывода статистики NATS (сек)")
     args = parser.parse_args()
 
@@ -101,7 +101,13 @@ def main():
         logger.info("Generating visualizations...")
         generate_all_plots(df, args.plots_dir)
 
-    # Задание 7 (повышенное): NATS скользящее окно (запускается в отдельном процессе/потоке)
+    # Задание 4 (повышенное): оценка производительности конвейера
+    if args.benchmark:
+        logger.info("Running performance benchmark...")
+        from benchmark import run_benchmark
+        run_benchmark(args.data_dir, parquet_path)
+
+    # Задание 7 (повышенное): NATS скользящее окно (блокирующий цикл — запускать последним)
     if args.nats_url:
         logger.info(f"Starting NATS sliding window consumer: {args.nats_url}, window={args.nats_window}s")
         try:
@@ -111,12 +117,6 @@ def main():
             asyncio.run(consumer.run(report_interval=args.nats_report))
         except KeyboardInterrupt:
             logger.info("NATS consumer stopped.")
-
-    # Задание 4 (повышенное): оценка производительности конвейера
-    if args.benchmark:
-        logger.info("Running performance benchmark...")
-        from benchmark import run_benchmark
-        run_benchmark(args.data_dir, parquet_path)
 
     logger.info("Analysis complete!")
 

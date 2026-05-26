@@ -45,7 +45,7 @@ class SlidingWindowConsumer:
     При каждом новом сообщении события старше window_sec удаляются из начала deque.
     """
 
-    def __init__(self, nats_url: str, subject: str = "vacancies", window_sec: int = 60):
+    def __init__(self, nats_url: str, subject: str = "vacancies", window_sec: int = 300):
         self.nats_url = nats_url
         self.subject = subject
         self.window_sec = window_sec
@@ -149,7 +149,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="NATS sliding window consumer")
     parser.add_argument("--nats-url", default="nats://localhost:4222", help="NATS server URL")
     parser.add_argument("--subject", default="vacancies", help="NATS subject (topic)")
-    parser.add_argument("--window-sec", type=int, default=60, help="скользящее окно (секунды)")
+    parser.add_argument("--window-sec", type=int, default=300, help="скользящее окно (секунды)")
     parser.add_argument("--report-interval", type=int, default=10, help="интервал вывода статистики (сек)")
     args = parser.parse_args()
 

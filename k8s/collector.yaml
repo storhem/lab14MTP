@@ -65,7 +65,6 @@ spec:
     targetPort: 50051
     name: arrow-flight
 ---
----
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
