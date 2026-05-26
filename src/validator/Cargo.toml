@@ -8,7 +8,7 @@ name = "vacancy_validator"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-pyo3 = { version = "0.21", features = ["extension-module"] }
+pyo3 = { version = "0.21", optional = true }
 
 [features]
 default = []
