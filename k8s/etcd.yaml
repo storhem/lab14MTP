@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: etcd
+  namespace: lab14
+spec:
+  selector:
+    matchLabels:
+      app: etcd
+  serviceName: etcd
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: etcd
+    spec:
+      containers:
+      - name: etcd
+        image: bitnami/etcd:3.5
+        env:
+        - name: ALLOW_NONE_AUTHENTICATION
+          value: "yes"
+        - name: ETCD_ADVERTISE_CLIENT_URLS
+          value: "http://etcd:2379"
+        - name: ETCD_LISTEN_CLIENT_URLS
+          value: "http://0.0.0.0:2379"
+        ports:
+        - containerPort: 2379
+        readinessProbe:
+          exec:
+            command: ["etcdctl", "endpoint", "health"]
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+  namespace: lab14
+spec:
+  selector:
+    app: etcd
+  ports:
+  - port: 2379
+    targetPort: 2379

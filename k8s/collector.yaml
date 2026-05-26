@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector
+  namespace: lab14
+  labels:
+    app: collector
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: collector
+  template:
+    metadata:
+      labels:
+        app: collector
+    spec:
+      containers:
+      - name: collector
+        image: lab14/collector:latest
+        imagePullPolicy: Never  # локальный образ (minikube)
+        env:
+        - name: ETCD_ENDPOINTS
+          value: "etcd:2379"
+        - name: WORKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name  # Pod name как worker ID
+        - name: FLIGHT_ADDR
+          value: ":50051"
+        - name: OUTPUT_DIR
+          value: "/data"
+        - name: WINDOW_SEC
+          value: "60"
+        - name: BATCH_SIZE
+          value: "50"
+        ports:
+        - containerPort: 50051
+          name: arrow-flight
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        volumeMounts:
+        - name: vacancy-data
+          mountPath: /data
+      volumes:
+      - name: vacancy-data
+        persistentVolumeClaim:
+          claimName: vacancy-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: collector
+  namespace: lab14
+spec:
+  selector:
+    app: collector
+  ports:
+  - port: 50051
+    targetPort: 50051
+    name: arrow-flight
+---
+# HPA: автоскалирование по CPU (Задание 5 повышенного уровня)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: collector-hpa
+  namespace: lab14
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: collector
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 75
